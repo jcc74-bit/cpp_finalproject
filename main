@@ -1,0 +1,926 @@
+// READ FIRST: You will be playing tictactoe, RPS, Connect 4 or hangman as minigames to obtain items/attack enemies
+
+#include <iostream>
+#include <cstdlib>
+#include <ctime>
+#include <vector>
+#include <algorithm> // provides a variety of functions
+#include <unistd.h>
+using namespace std;
+
+// displayText displays letter by letter
+// displayMessage displays line by line
+
+void displayText(const string& text, int delay = 50, bool nextLine = true); // defaults when no parameter specificed
+void displayMessage(const string& text, int delay = 700, bool nextLine = true); // delay : 100 per character/sentence
+
+class Item; // item will be declared later
+
+// character class
+class Character {
+public:
+	string name;
+	int hp;
+	int strength;
+	int defense;
+
+	Character() {}
+
+	Character(string n, int h, int s, int d) {
+		name = n;
+		hp = h;
+		strength = s;
+		defense = d;
+	}
+
+	virtual int attack() {
+		return strength;
+	}
+
+	virtual void defend(int damage) {
+		int netDamage = damage - defense;
+		if (netDamage > 0)
+			hp -= netDamage;
+		if (hp < 0)
+			hp = 0;
+	}
+
+	bool isAlive() {
+		return hp > 0;
+	}
+
+	virtual void displayInfo() {
+		displayText(name + "\nHP: " + to_string(hp) + "\nStrength: " + to_string(strength) + "\nDefense: " + to_string(defense));
+	}
+
+	void changeStats(int h, int s) {
+		hp += h;
+		strength += s;
+		if (hp < 0) hp = 0;
+	}
+};
+
+//ally class thats inherited from character
+class Ally : public Character {
+public:
+	Ally() {}
+	Ally(string n, int h, int s, int d) : Character(n, h, s, d) {}
+
+	void displayInfo() override {
+		displayText("Ally Info: ");
+		Character::displayInfo();
+	}
+};
+
+//player class inherited from character
+class Player : public Character {
+public:
+	int armor;
+	int weapon;
+	bool hasAlly;
+	Ally ally;
+	int maxHp;
+	vector<Item> inventory;
+	int inventoryLimit = 25;
+
+	Player() {
+		hasAlly = false;
+	}
+
+	Player(string n, int h, int s, int d, int a, int w)
+		: Character(n, h, s, d), armor(a), weapon(w) {
+		hasAlly = false;
+		inventoryLimit = 25;
+		maxHp = h;
+	}
+
+	int attack() override {
+		int boost = hasAlly ? 5 : 0;
+		return strength + weapon + boost;
+	}
+
+	void defend(int damage) override {
+		int boost = hasAlly ? 2 : 0;
+		int netDamage = damage - defense - armor - boost;
+		if (netDamage > 0)
+			hp -= netDamage;
+		if (hp < 0) hp = 0;
+	}
+
+	void assignAlly(Ally a) {
+		ally = a;
+		hasAlly = true;
+	}
+
+	void removeAlly() {
+		hasAlly = false;
+	}
+
+	void displayInfo() override {
+		Character::displayInfo();
+		displayText( "Armor: " + to_string(armor) + " \nWeapon Dmg: " + to_string(weapon) );
+		if (hasAlly) {
+			displayText( "Ally: " + ally.name );
+		}
+	}
+};
+
+//enemy class inherited from charater
+class Enemy : public Character {
+public:
+	bool hasAlly;
+	Ally ally;
+
+	Enemy() {
+		hasAlly = false;
+	}
+
+	Enemy(string n, int h, int s, int d)
+		: Character(n, h, s, d) {
+		hasAlly = false;
+	}
+
+	int attack() override {
+		int boost = hasAlly ? 3 : 0;
+		return strength + boost;
+	}
+
+	void assignAlly(Ally a) {
+		ally = a;
+		hasAlly = true;
+	}
+
+	void removeAlly() {
+		hasAlly = false;
+	}
+
+	void displayInfo() override {
+		Character::displayInfo();
+		if (hasAlly)
+			displayText( "Ally: " + ally.name );
+	}
+};
+
+//item class with functions about how item can be used
+class Item {
+public:
+	string name;
+	string description;
+	int hpBoost;
+	int atkBoost;
+	int uses;
+
+	Item() {}
+
+	Item(string n, string desc, int h, int a, int u = 1)
+		: name(n), description(desc), hpBoost(h), atkBoost(a), uses(u) {}
+
+	// function for using an item
+	void applyTo(Character& target, bool positive = true) {
+		if (uses <= 0) return;
+		int h = positive ? hpBoost : -hpBoost;
+		int a = positive ? atkBoost : -atkBoost;
+		target.changeStats(h, a);
+		uses--;
+		displayText(name + " used on " + target.name + ". Remaining uses: " + to_string(uses));
+	}
+
+	// function for displaying item
+	void display(int index) const {
+		displayText(to_string(index + 1) + ". " + name + " - " + description);
+		displayText("    HP Boost: " + to_string(hpBoost) +
+		            ", ATK Boost: " + to_string(atkBoost) +
+		            ", Uses Left: " + to_string(uses));
+	}
+
+	// deletes item if uses = 0 because it means ran out
+	bool isDepleted() const {
+		return uses <= 0;
+	}
+};
+
+//the use of special item (switch ally)
+bool useSwitchItem(vector<Item>& inventory) {
+	auto it = find_if(inventory.begin(), inventory.end(),
+	[](const Item& item) {
+		return item.name == "Switch Ally";
+	});
+	if (it != inventory.end()) {
+		inventory.erase(it);
+		return true;
+	}
+	return false;
+}
+
+//function for actually replacing the ally
+void replaceAlly(Player& player, const Ally& newAlly, vector<Item>& inventory) {
+	if (!player.hasAlly) {
+		displayText("Assigning new ally.");
+		player.assignAlly(newAlly);
+	} else if (useSwitchItem(inventory)) {
+		displayText("Using 'Switch Ally' item to replace current ally.");
+		player.assignAlly(newAlly);
+	} else {
+		displayText("You need a 'Switch Ally' item to replace your current ally.");
+	}
+}
+
+//function that deletes used up items from inventory
+void removeDepletedItems(vector<Item>& inventory) {
+	for (int i = 0; i < inventory.size(); ) {
+		if (inventory[i].uses == 0) {
+			inventory.erase(inventory.begin() + i);
+		} else {
+			i++;
+		}
+	}
+}
+
+//checks for item in inventory
+bool hasItem(const vector<Item>& inv, const string& targetedItem) {
+	for (const auto& it : inv) {
+		if (it.name == targetedItem) return true;
+	}
+	return false;
+}
+
+//gives possibility of using item
+void useItemMenu(Player& player, Enemy& enemy) {
+	if (player.inventory.empty()) {
+		displayText("Your inventory is empty.");
+		return;
+	}
+	displayText("Choose an item to use:");
+	for (size_t i = 0; i < player.inventory.size(); ++i) {
+		cout << i << ". " << player.inventory[i].name << " - " << player.inventory[i].description
+		     << " (Uses: " << player.inventory[i].uses << ")" << endl;
+	}
+	int choice;
+	cin >> choice;
+	if (choice < 0 || choice >= player.inventory.size()) {
+		displayText("Invalid choice.");
+		return;
+	}
+
+	//conditions/perks for using item, if not reached then item isnt able to be used
+	Item& item = player.inventory[choice];
+	if (item.name.find("Heal") != string::npos) {
+		if (item.hpBoost > 0 && player.hp < player.maxHp) {
+			int healAmt = min(item.hpBoost, player.maxHp - player.hp);
+			player.hp += healAmt;
+			displayText("Healed " + to_string(healAmt) + " HP.");
+			item.uses--;
+		}
+		else {
+			displayText("You're already at full health.");
+		}
+	} else if (item.name.find("Health Potion") != string::npos) {
+		player.maxHp += item.hpBoost;
+		player.hp += item.hpBoost;
+		displayText("Your max HP increased by " + to_string(item.hpBoost) + ".");
+		item.uses--;
+	} else if (item.name == "New Armor") {
+		player.armor += 2;
+		item.uses--;
+		displayText("You equipped new armor. +2 armor.");
+	} else if (item.name == "New Weapon") {
+		player.weapon += 1;
+		item.uses--;
+		displayText("You equipped new weapon. +1 weapon.");
+	} else if (item.name == "Small Damage Potion") {
+		enemy.defend(3);
+		item.uses--;
+		displayText("You dealt 3 damage to the enemy.");
+	} else if (item.name == "Large Damage Potion") {
+		enemy.defend(8);
+		item.uses--;
+		displayText("You dealt 8 damage to the enemy.");
+	}
+
+	if (item.isDepleted()) {
+		player.inventory.erase(player.inventory.begin() + choice);
+	}
+}
+
+//plays RPS
+bool playRockPaperScissors() {
+	string choices[] = {"rock", "paper", "scissors"};
+	string playerChoice;
+	int enemyChoice = rand() % 3;
+	displayText("Choose rock, paper, or scissors:");
+	cin >> playerChoice;
+	transform(playerChoice.begin(), playerChoice.end(), playerChoice.begin(), ::tolower);
+	displayText ("enemy chooses " + choices[enemyChoice]);
+	if (playerChoice == choices[enemyChoice]) {
+		displayText("It's a tie!");
+		return false;
+	}
+	if ((playerChoice == "rock" && choices[enemyChoice] == "scissors") ||
+	        (playerChoice == "paper" && choices[enemyChoice] == "rock") ||
+	        (playerChoice == "scissors" && choices[enemyChoice] == "paper")) {
+		displayText("You win!");
+		return true;
+	} else {
+		displayText("You lose.");
+		return false;
+	}
+}
+
+//plays hangman
+bool playHangman() {
+	vector<string> words = {"dragon", "sword", "castle", "wizard", "battle"};
+	string word = words[rand() % words.size()];
+	string display(word.length(), '_');
+	int attempts = 6;
+	vector<char> guessed;
+
+	while (attempts > 0 && display != word) {
+		displayText("There are " + to_string(word.length()) + " letters in the word.");
+		displayText("Word: " + display);
+		displayText("Guess a letter: ");
+		char guess;
+		cin >> guess;
+		guess = tolower(guess);
+
+		if (find(guessed.begin(), guessed.end(), guess) != guessed.end()) {
+			displayText("Already guessed.");
+			continue;
+		}
+
+		guessed.push_back(guess);
+		bool found = false;
+		for (int i = 0; i < word.length(); i++) {
+			if (word[i] == guess) {
+				display[i] = guess;
+				found = true;
+			}
+		}
+		if (!found) attempts--;
+		displayText ("attempts left: " + to_string(attempts));
+	}
+
+	if (display == word) {
+		displayText("You guessed it! The word was: " + word);
+		return true;
+	} else {
+		displayText("You failed. The word was: " + word);
+		return false;
+	}
+}
+
+//plays tictactoe
+bool playTicTacToe() {
+	auto printBoard = [](char grid[3][3]) {
+		for (int i = 0; i < 3; i++) {
+			for (int j = 0; j < 3; j++) {
+				std::cout << grid[i][j] << " ";
+			}
+			cout << endl;
+		}
+	};
+
+	auto isWinner = [](char grid[3][3]) -> bool {
+		for (int i = 0; i < 3; i++) {
+			if (grid[i][0] == grid[i][1] && grid[i][1] == grid[i][2]) return true;
+			if (grid[0][i] == grid[1][i] && grid[1][i] == grid[2][i]) return true;
+		}
+		if (grid[0][0] == grid[1][1] && grid[1][1] == grid[2][2]) return true;
+		if (grid[0][2] == grid[1][1] && grid[1][1] == grid[2][0]) return true;
+		return false;
+	};
+
+	int p1, counter = 0;
+	char grid[3][3] = {{'1', '2', '3'}, {'4', '5', '6'}, {'7', '8', '9'}};
+
+	srand(time(nullptr));
+
+	do {
+		if (counter % 2 == 0) {
+			printBoard(grid);
+			displayText( "Player 1 make a move: " );
+			cin >> p1;
+			if (p1 < 1 || p1 > 9 || grid[(p1 - 1) / 3][(p1 - 1) % 3] == 'X' || grid[(p1 - 1) / 3][(p1 - 1) % 3] == 'O') {
+				displayText( "Spot Taken. Try again." );
+				continue;  // retry input
+			} else {
+				grid[(p1 - 1) / 3][(p1 - 1) % 3] = 'X';
+			}
+		} else {
+			int compMove;
+			do {
+				compMove = rand() % 9 + 1;
+			} while (grid[(compMove - 1) / 3][(compMove - 1) % 3] == 'X' || grid[(compMove - 1) / 3][(compMove - 1) % 3] == 'O');
+
+			grid[(compMove - 1) / 3][(compMove - 1) % 3] = 'O';
+			displayText( "Computer chooses: " + compMove );
+		}
+		counter++;
+	} while (!isWinner(grid) && counter < 9);
+
+	printBoard(grid);
+
+	counter--;
+	if (isWinner(grid)) {
+		if (counter % 2 == 0)
+			displayText( "X is the winner!" );
+		else
+			displayText( "O is the winner!" );
+		return true;
+	} else {
+		displayText( "The game is a tie." );
+		return false;
+	}
+}
+
+//plays connect 4
+bool playConnect4() {
+	const int ROWS = 6, COLS = 7;
+	vector<vector<char>> board(ROWS, vector<char>(COLS, '.'));
+	auto printBoard = [&]() {
+		for (auto& row : board) {
+			for (char c : row) cout << c << ' ';
+			cout << endl;
+		}
+		cout << "--------------------" << endl;
+	};
+
+	auto drop = [&](int col, char token) {
+		for (int i = ROWS - 1; i >= 0; --i) {
+			if (board[i][col] == '.') {
+				board[i][col] = token;
+				return i;
+			}
+		}
+		return -1;
+	};
+
+	auto checkWin = [&](int r, int c, char token) {
+		int directions[4][2] = {{0,1},{1,0},{1,1},{1,-1}};
+		for (auto& [dr, dc] : directions) {
+			int count = 0;
+			for (int d = -3; d <= 3; ++d) {
+				int nr = r + d * dr, nc = c + d * dc;
+				if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && board[nr][nc] == token) count++;
+				else count = 0;
+				if (count == 4) return true;
+			}
+		}
+		return false;
+	};
+
+	for (int turn = 0; turn < ROWS * COLS; ++turn) {
+		printBoard();
+		int col;
+		if (turn % 2 == 0) {
+			displayText("Choose column (0-6): ");
+			cin >> col;
+		} else col = rand() % COLS;
+		if (col < 0 || col >= COLS || board[0][col] != '.') {
+			--turn;
+			continue;
+		}
+		int row = drop(col, turn % 2 == 0 ? 'X' : 'O');
+		if (checkWin(row, col, turn % 2 == 0 ? 'X' : 'O')) {
+			printBoard();
+			displayText(turn % 2 == 0 ? "You win!" : "You lose.");
+			return turn % 2 == 0;
+		}
+	}
+	displayText("It's a tie.");
+	return false;
+}
+
+// function that decides which minigame gets played
+bool playMiniGame() {
+	int game = rand() % 4;
+	if (game == 0) {
+		displayText ("We are playing rock paper scissors");
+		return playRockPaperScissors();
+	}
+	else if (game == 1) {
+		displayText ("We are playing tic-tac-toe, try and get three in a row");
+		return playTicTacToe();
+	}
+	else if (game == 2) {
+		displayText ("We are playing connect4, try and get four in a row");
+		return playConnect4();
+	}
+	else {
+		displayText ("We are playing hangman, try and guess the word");
+		return playHangman();
+	}
+}
+
+int main() {
+
+	// storyline!!
+
+	displayText ("...");
+	displayText ("*wakes up*");
+	displayText ("Me: wait where am i?");
+	displayText ("Voice: Youve finally awoken.");
+	displayText ("Me: Whos this and where am I??");
+	displayText ("Voice: This is the dungeon of kaboom, who i am is not important.");
+	displayText ("Voice: There is no way out, just survival..");
+	displayText ("Voice: may the luck be on your side...");
+	displayText ("Me: wait huh? \n\n");
+	displayMessage ("Welcome to the Dungeon of Kaboom\n");
+	displayMessage ("you will encounter items, enemies and allies.\n");
+	displayMessage ("use your gaming skills to beat these enemies and level up\n");
+	displayMessage ("losing can help enemies or harm you directly so try your hardest\n");
+	displayMessage ("use the loot you come across strategically\n");
+	displayMessage ("try and befriend allies for boosts.. beaware of who. you. trust.\n");
+	displayMessage ("follow all rules, be ruthless on enemies and you might survive long enough to find a way out\n");
+	displayMessage ("good luck. youll need it.\n");
+	cout << endl << endl << endl;
+	displayText (R"( _____                                                                         _____ 
+( ___ )                                                                       ( ___ )
+ |   |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~|   | 
+ |   |                                                                         |   | 
+ |   |                                                                         |   | 
+ |   |  _______   __    __  .__   __.   _______  _______   ______   .__   __.  |   | 
+ |   | |       \ |  |  |  | |  \ |  |  /  _____||   ____| /  __  \  |  \ |  |  |   | 
+ |   | |  .--.  ||  |  |  | |   \|  | |  |  __  |  |__   |  |  |  | |   \|  |  |   | 
+ |   | |  |  |  ||  |  |  | |  . `  | |  | |_ | |   __|  |  |  |  | |  . `  |  |   | 
+ |   | |  '--'  ||  `--'  | |  |\   | |  |__| | |  |____ |  `--'  | |  |\   |  |   | 
+ |   | |_______/  \______/  |__| \__|  \______| |_______| \______/  |__| \__|  |   | 
+ |   |                                                                         |   | 
+ |   |   ______    _______                                                     |   | 
+ |   |  /  __  \  |   ____|                                                    |   | 
+ |   | |  |  |  | |  |__                                                       |   | 
+ |   | |  |  |  | |   __|                                                      |   | 
+ |   | |  `--'  | |  |                                                         |   | 
+ |   |  \______/  |__|                                                         |   | 
+ |   |                                                                         |   | 
+ |   |  __  ___      ___      .______     ______     ______   .___  ___.       |   | 
+ |   | |  |/  /     /   \     |   _  \   /  __  \   /  __  \  |   \/   |       |   | 
+ |   | |  '  /     /  ^  \    |  |_)  | |  |  |  | |  |  |  | |  \  /  |       |   | 
+ |   | |    <     /  /_\  \   |   _  <  |  |  |  | |  |  |  | |  |\/|  |       |   | 
+ |   | |  .  \   /  _____  \  |  |_)  | |  `--'  | |  `--'  | |  |  |  |       |   | 
+ |   | |__|\__\ /__/     \__\ |______/   \______/   \______/  |__|  |__|       |   | 
+ |   |                                                                         |   | 
+ |   |                                                                         |   | 
+ |___|~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~|___| 
+(_____)                                                                       (_____))", 2 , true);
+
+
+	//initilize variables used
+	srand(time(0));
+	int pchoice;
+	string name;
+	int hp;
+	int strength;
+	int defense;
+	int w;
+	int a;
+	int killCount = 0;
+	int GamesWon = 0;
+	int GamesLost = 0;
+    
+    //makes sure user's player input in valid
+	bool isValid = false;
+
+	do {
+		// choose starting player, each player has diffeent stats
+		cout << endl << endl;
+		cout << "===== choose your player =====" << endl;
+		cout << "1. Adam" << endl;
+		cout << "2. Bryan" << endl;
+		cout << "3. Crooks" << endl;
+		cout << "4. David" << endl;
+		cout << endl;
+		cout << "Enter your choice: " << endl;
+		cin >> pchoice;
+
+		if (pchoice == 1) {
+			name = "Adam";
+			hp = 10;
+			strength = 2;
+			defense = 8;
+			w = 2;
+			a = 3;
+			isValid = true;
+		}
+
+		else if (pchoice == 2) {
+			name = "Bryan";
+			hp = 15;
+			strength = 7;
+			defense = 2;
+			w = 5;
+			a = 1;
+			isValid = true;
+		}
+
+		else if (pchoice == 3) {
+			name = "Crooks";
+			hp = 15;
+			strength = 8;
+			defense = 5;
+			w = 1;
+			a = 1;
+			cout << endl;
+			isValid = true;
+
+		}
+
+		else if (pchoice == 4) {
+			name = "David";
+			hp = 10;
+			strength = 4;
+			defense = 8;
+			w = 2;
+			a = 1;
+			isValid = true;
+		}
+
+		else {
+			displayText ("invalid player, try again");
+		}
+
+	} while (!isValid);
+
+	Player User(name, hp, strength, defense, a, w);
+	cout << endl;
+	User.displayInfo();
+
+	bool isContinue = true;
+	int mchoice;
+
+	do {
+		// do while loop to ensure game keeps going until condition to end is met, menu for options on next move
+		cout << endl;
+		displayText( "===== menu =====" );
+		displayText( "1. explore" );
+		displayText( "2. inventory/use item" );
+		displayText( "3. stats" );
+		displayText( "4. exit" );
+		cout << endl;
+		displayText( "Enter your choice: " );
+		cin >> mchoice;
+		cout << endl;
+
+		if (mchoice == 1) {
+			bool done = false;
+			do {
+				int chance = rand() % 100;
+
+				// item encounter (35%) all possibly items with their probabilities, rarer the item, harder to find (ex. 2% chance for switch ally book)
+				if (chance < 35) {
+					int itemRoll = rand() % 100;
+					Item foundItem;
+
+					if (itemRoll < 5)
+						foundItem = Item("Large Heal Potion", "Heals 3 HP (lost HP only)", 3, 0, 1);
+					else if (itemRoll < 19)
+						foundItem = Item("Small Heal Potion", "Heals 1 HP (lost HP only)", 1, 0, 1);
+					else if (itemRoll < 22)
+						foundItem = Item("New Armor", "+2 to armor", 2, 0, 1);
+					else if (itemRoll < 23)
+						foundItem = Item("Large Health Potion", "+4 max HP", 4, 0, 1);
+					else if (itemRoll < 28)
+						foundItem = Item("Small Health Potion", "+1 max HP", 1, 0, 1);
+					else if (itemRoll < 30)
+						foundItem = Item("Switch Ally Book", "Allows changing allies", 0, 0, 1);
+					else if (itemRoll < 35)
+						foundItem = Item("New Weapon", "+1 to weapon", 0, 1, 1);
+					else if (itemRoll < 37)
+						foundItem = Item("Backpack Upgrade", "Increases inventory size by 10", 0, 0, 1);
+					else if (itemRoll < 85)
+						foundItem = Item("Small Damage Potion", "Deals 3 damage to enemy", -3, 0, 1);
+					else
+						foundItem = Item("Large Damage Potion", "Deals 8 damage to enemy", -8, 0, 1);
+
+					displayText("You found: " + foundItem.name);
+					// checks if player CAN hold item, then makes user play a game to see if they get to keep what they found
+					if (User.inventory.size() >= User.inventoryLimit) {
+						displayText("Your inventory is full. You cannot take this item.");
+					} else {
+						if (playMiniGame()) {
+							displayText("You won the minigame! Item added to inventory.");
+							GamesWon++;
+							User.inventory.push_back(foundItem);
+							if (foundItem.name == "Backpack Upgrade") {
+								User.inventoryLimit += 5;
+								displayText("Your inventory limit increased by 5!");
+							}
+						} else {
+							displayText("You failed the minigame. You do not get the item.");
+							GamesLost++;
+						}
+					}
+					done = true;
+				}
+
+				// 40% chance to encounter an enemy
+				else if (chance < 75) {
+					int enemyHP = 6 + 6 * killCount; //enemy gets stronger as you advance (kill more)
+					int enemyDmg = 4 + 4 * killCount / 2;
+					Enemy enemy("Spider Crawler", enemyHP, enemyDmg, 0);
+
+					displayText("An enemy appears!");
+					cout << endl;
+					enemy.displayInfo();
+					bool enemyDead = false;
+					bool enemyRan = false;
+
+					while (!enemyDead && !enemyRan && User.hp > 0) { // while both enemy and player are alive, user gets to choose next move
+						displayText("What do you want to do? \n 1. Attack \n 2. Use Item \n 3. Run");
+						int choice;
+						cin >> choice;
+
+						if (choice == 1) { // plays minigame to determine if attack is missed or hit
+							if (playMiniGame()) {
+								GamesWon++;
+								int dmg = User.attack();
+								enemy.defend(dmg);
+								displayText("You attacked for " + to_string(dmg) + " damage.");
+								if (!enemy.isAlive()) {
+									displayText("You defeated the enemy!");
+									killCount++;
+									enemyDead = true;
+								}
+							}
+							else {
+								displayText("You failed the minigame. Your attack missed.");
+								GamesLost++;
+							}
+						} else if (choice == 2) {
+							useItemMenu(User, enemy);
+						} else if (choice == 3) {
+							displayText("You ran away scaredy cat.");
+							enemyRan = true;
+						}
+
+						// Enemy turn
+						if (!enemyDead && !enemyRan) {
+							// 8% chance for the enemy to run away instead of attacking
+							if ((rand() % 100) < 8) {
+								displayText("The enemy ran away!");
+								enemyRan = true;
+							} else {
+								int dmg = enemy.attack();
+								User.defend(dmg);
+								displayText("The enemy attacks and deals " + to_string(dmg) + " damage!");
+							}
+						}
+						done = true;
+						cout << endl;
+						User.displayInfo(); //displays stats of enemy and user after every attack
+						cout << endl;
+						enemy.displayInfo();
+					}
+				}
+
+				// probabilty of ally encounter 5%, lower rates for rarity of ally (ex. phoenix is 0.5% of the 5%)
+				else if (chance < 80) {
+					int aRoll = rand() % 1000;
+					Ally ally;
+					if (aRoll < 5) ally = Ally("Phoenix", 20, 10, 9);
+					else if (aRoll < 20) ally = Ally("Dragon", 12, 5, 5);
+					else if (aRoll < 50) ally = Ally("Bear", 10, 7, 2);
+					else if (aRoll < 100) ally = Ally("Dog", 6, 4, 2);
+					else ally = Ally("Rock", 5, 1, 3);
+
+					displayText("You found a potential ally: " + ally.name);
+					//checks to see if player can have an ally
+					if (!User.hasAlly || hasItem(User.inventory, "Switch Ally Book")) {
+						if (playMiniGame()) {
+							displayText("You somehow won the minigame! Ally joins you.");
+							GamesWon++;
+							replaceAlly(User, ally, User.inventory);
+						} else {
+							displayText("You suck, you failed the minigame. The ally walks away.");
+							GamesLost++;
+						}
+					} else {
+						displayText("You already have an ally and no Switch Ally Book.");
+					}
+					done = true;
+				}
+
+				// probability of finding nothing while exploring
+				else {
+					displayText("You found nothing this time. Stop being lazy and keep exploring");
+					done = true;
+				}
+
+			}
+			while (!done);
+		}
+
+		else if (mchoice == 2) {
+			displayText("\n===== Inventory =====\n");
+
+			removeDepletedItems(User.inventory); // auto-clean depleted items
+
+			if (User.inventory.empty()) { // if inventory has nothing
+				displayText("Inventory is empty.");
+			}
+			else {
+				for (int i = 0; i < User.inventory.size(); i++) {
+					User.inventory[i].display(i);
+				}
+				// menu in menu, allows for more interactions/clear up inventory if too much items OR find out more about items you have
+				displayText("\nWhat would you like to do?");
+				displayText("1. Use item");
+				displayText("2. Delete item");
+				displayText("3. Exit inventory");
+
+				int invChoice;
+				cin >> invChoice;
+
+				if (invChoice == 1) {
+					displayText("Enter item number to use:");
+					int idx;
+					cin >> idx;
+					if (idx >= 1 && idx <= User.inventory.size()) {
+						User.inventory[idx - 1].applyTo(User);
+						if (User.inventory[idx - 1].isDepleted()) {
+							displayText("Item used up and removed from inventory.");
+							User.inventory.erase(User.inventory.begin() + idx - 1);
+						}
+					}
+					else {
+						displayText("Invalid selection.");
+					}
+				}
+				else if (invChoice == 2) {
+					displayText("Enter item number to delete:");
+					int idx;
+					cin >> idx;
+					if (idx >= 1 && idx <= User.inventory.size()) {
+						displayText(User.inventory[idx - 1].name + " deleted from inventory.");
+						User.inventory.erase(User.inventory.begin() + idx - 1);
+					} else {
+						displayText("Invalid selection.");
+					}
+				} else {
+					displayText("Exiting inventory.");
+				}
+			}
+			//ensures players do not carry more than the limit
+			displayText("Inventory Size: " + to_string(User.inventory.size()) + "/" + to_string(User.inventoryLimit));
+			if (User.inventory.size() >= User.inventoryLimit) {
+				displayText("Inventory Full! You cannot collect more items.");
+			}
+		}
+		// keeps count of stats, gives player option to view their record
+		else if (mchoice == 3) {
+			User.displayInfo();
+			cout << "Games Won: " << GamesWon << endl;
+			cout << "Games Lost (tie = lost): " << GamesLost << endl;
+			cout << "Kill Count: " << killCount << endl;
+		}
+
+		else if (mchoice == 4) {
+			cout << "imagine exiting?" << endl;
+		}
+
+		else
+			cout << "invalid try again" << endl;
+
+
+	} // condition to end game
+	while (isContinue && mchoice != 4);
+	cout << "game over loser, you didnt have the skills to survive" << endl;
+	displayText (R"(
+                     _           _        __               
+ _   _  ___  _   _  | | ___  ___| |_   _ / /               
+| | | |/ _ \| | | | | |/ _ \/ __| __| (_) |                
+| |_| | (_) | |_| | | | (_) \__ \ |_   _| |                
+ \__, |\___/ \__,_| |_|\___/|___/\__| (_) |                
+ |___/               _                   \_\
+| |__   ___   ___   | |__   ___   ___    _   _  ___  _   _ 
+| '_ \ / _ \ / _ \  | '_ \ / _ \ / _ \  | | | |/ _ \| | | |
+| |_) | (_) | (_) | | | | | (_) | (_) | | |_| | (_) | |_| |
+|_.__/ \___/ \___/  |_| |_|\___/ \___/   \__, |\___/ \__,_|
+ ___ _   _  ___| | __  _ _ __            |___/             
+/ __| | | |/ __| |/ / (_) '_ \
+\__ \ |_| | (__|   <   _| |_) |                            
+|___/\__,_|\___|_|\_\ (_) .__/                             
+                        |_|                                )", 10, true);
+
+}
+
+// display one letter at a line
+void displayText(const string& text, int delay, bool nextLine) {
+
+	for (int i=0; i<text.size(); i++) { //read only
+		cout << text[i] << flush; // disply text immendiately, flush stops the buffer
+		usleep(delay * 1000); // pause text in microseconds (*1000 = milisecond)
+	}
+
+	if (nextLine)
+		cout<<endl;
+}
+
+//display with a pause;
+void displayMessage(const string& text, int delay, bool nextLine) {
+	cout << text ;
+	if (nextLine)
+		cout<<endl;
+	usleep(delay * 1000);
+}
+
+
